@@ -1,120 +1,136 @@
 # MealVLA
 
-语言条件机械臂操作：数据准备、SmolVLA 微调、动作执行与 LIBERO 评估。
+**语言条件机械臂操作：从示教数据、策略微调到闭环评估。**
 
-MealVLA 面向配餐任务中的抓取与放置需求，将视觉—语言—动作模型接入机器人执行流程。当前以 LIBERO 单臂任务为实验环境，关注三个工程问题：示教数据如何划分，模型输出如何交给控制器，以及执行结果如何统计。
+[![Core checks](https://github.com/Hanamaki-CL/VLA/actions/workflows/ci.yml/badge.svg)](https://github.com/Hanamaki-CL/VLA/actions/workflows/ci.yml)
 
-## 实现
+MealVLA 是基于 SmolVLA、LeRobot 和 LIBERO 的单臂操作实验框架，面向抓取与放置任务。输入语言指令、双视角图像和机器人状态，输出动作块，通过滚动执行与反馈观测完成仿真回合。项目提供数据处理、训练启动、推理控制、结果分析和实验归档的统一入口。
 
-- **数据准备**：按任务分层、按完整 episode 划分训练/验证/测试集；独立导出各子集，重新计算统计量；记录源数据 revision 和 episode 映射。
-- **策略接入**：对接 SmolVLA checkpoint 及其预处理器，统一双视角图像、末端状态和七维控制输入。
-- **动作执行**：每次预测一段动作，只执行指定前缀，再根据新观测推理；检查动作维度、数值范围和有效期。
-- **评估记录**：保存逐回合结果，分别统计首次成功与重置重试后的成功率、推理延迟、失败原因和置信区间。
-- **ROS 2 示例**：接收动作消息并返回校验结果，供接口联调使用，不连接真机控制器。
+版本 **1.0.0** · [运行指南](docs/RUN_5090.md) · [命令参考](docs/CLI.md) · [架构](docs/ARCHITECTURE.md) · [版本说明](CHANGELOG.md)
 
-模型和训练循环使用 [SmolVLA / LeRobot](https://github.com/huggingface/lerobot)。本仓库负责数据组织、策略与环境适配、执行约束和评估流程。
+## 核心能力
+
+| 模块 | 实现 |
+| --- | --- |
+| 数据工程 | 按任务分层的 episode 级划分，独立导出训练/验证/测试集，保存数据 revision、统计量和源 episode 映射 |
+| VLA 接入 | SmolVLA checkpoint 加载，双视角 RGB + 8 维状态输入，7 维动作反归一化 |
+| 执行控制 | 动作块前缀执行、重新观测、维度与数值边界校验、动作有效期、有限次数重置重试 |
+| 实验编排 | 一条命令串联数据、训练、评估，自动传递 checkpoint，保存实际配置和分阶段日志 |
+| 结果分析 | 首次/最终成功率、Wilson 95% 区间、推理与控制耗时、失败原因、逐回合 CSV 和离线 HTML 报告 |
+| 演示归档 | 可选双视角 MP4，每次重试单独保存，报告链接到对应视频 |
+| 工程接口 | Python 包与 CLI、ROS 2 动作消息校验示例、GitHub Actions 核心测试与构建 |
+
+模型结构和训练循环来自 [SmolVLA / LeRobot](https://github.com/huggingface/lerobot)。本仓库实现数据组织、观测与动作适配、执行约束、实验编排及报告。
 
 ## 架构
 
 ```mermaid
 flowchart LR
-    subgraph Training[训练]
-        D[示教数据] --> S[Episode 划分与导出]
-        S --> T[SmolVLA 微调]
-        T --> C[模型与归一化统计]
-    end
-    subgraph Rollout[执行]
-        O[双视角图像 / 语言 / 状态] --> P[策略推理]
-        P --> Q[动作校验与前缀队列]
-        Q --> E[LIBERO]
-        E --> O
-        E --> R[逐回合记录]
-    end
-    C --> P
+    D[示教数据] --> S[Episode 划分与导出]
+    S --> T[SmolVLA 微调]
+    T --> C[Checkpoint 与训练统计]
+    C --> P[策略推理]
+    O[语言 / 双视角图像 / 状态] --> P
+    P --> Q[动作校验与前缀队列]
+    Q --> E[LIBERO 环境]
+    E --> O
+    E --> R[逐回合记录与视频]
+    R --> A[HTML / CSV / JSON 报告]
 ```
 
-[输入输出约定与执行状态](docs/ARCHITECTURE.md)
+## 快速开始
 
-## 开始使用
+### 查看执行与报告流程
 
-目标环境为 Linux、Python 3.11 和 NVIDIA GPU。安装脚本固定使用 LeRobot 0.4.3、PyTorch 2.7.1 / CUDA 12.8；训练配置以 RTX 5090 为目标，参数仍需根据实际显存调整。
+核心包只依赖 NumPy，无需 GPU 或模型下载。以下示例使用固定动作的 mock 环境，生成明确标记为 **MOCK** 的报告：
 
 ```bash
 git clone https://github.com/Hanamaki-CL/VLA.git
 cd VLA
+python -m pip install -e .
+mealvla demo --output outputs/mock-demo
+```
+
+用浏览器打开 `outputs/mock-demo/report.html`。此路径用于检查接口和归档流程，不代表模型效果。
+
+### RTX 5090 训练与仿真
+
+目标环境为 Linux、Python 3.11、NVIDIA GPU。安装脚本使用 PyTorch 2.7.1 / CUDA 12.8 和 LeRobot 0.4.3。
+
+```bash
 bash scripts/setup_5090.sh
 source .venv/bin/activate
 export MUJOCO_GL=egl
 mealvla doctor --cuda-check
+mealvla pipeline --print-plan
+bash scripts/run_5090.sh
 ```
 
-准备数据并启动训练：
+默认运行三个 `libero_object` 任务、20,000 steps 微调、每任务 20 个仿真场景。流水线自动将训练输出接入评估。已有匹配数据时使用 `--reuse-data`；独立实验使用 `--output outputs/experiments/<name>`。输出目录必须是新目录。
+
+FFmpeg、EGL、磁盘需求、分阶段命令及错误排查见[运行指南](docs/RUN_5090.md)。首次实际运行会下载上游数据和模型。
+
+## 实验产物
+
+```text
+outputs/experiments/<name>/
+├── pipeline.json          # 阶段状态、命令与来源
+├── data-manifest.json     # 本次数据 revision 和划分
+├── configs/               # 实际生效的配置快照
+├── logs/                  # prepare / train / evaluate 日志
+├── train/                 # LeRobot checkpoint
+└── eval/
+    ├── manifest.json      # 环境、版本与运行状态
+    ├── episodes.jsonl     # 原始逐回合记录
+    ├── summary.json       # 聚合指标
+    ├── episodes.csv       # 表格分析记录
+    ├── report.html        # 离线可视报告
+    └── videos/            # 启用录制后生成
+```
+
+在 `configs/eval_libero.json` 中设置 `"record_video": true` 即可录制双视角视频。每段视频对应一个场景的一次尝试。编码会影响回合总耗时；推理、仿真 step 和录制开销分别记录。
+
+评估中断时保留已完成场景和部分报告。成功率分母为已记录的场景数，重试不增加分母。默认协议属于自定义子集实验，详见[评估协议](docs/EXPERIMENTS.md)。
+
+## 配置与命令
+
+| 配置 | 用途 |
+| --- | --- |
+| `configs/pipeline_5090.json` | 关联各阶段配置，指定实验目录 |
+| `configs/data.json` | 数据源、revision、任务和划分种子 |
+| `configs/train_5090.json` | 模型、batch、训练步数、动作块长度 |
+| `configs/eval_libero.json` | 场景数量、执行步数、超时、重试和视频 |
 
 ```bash
 mealvla tasks --suite libero_object
 mealvla prepare --config configs/data.json
-bash scripts/train_5090.sh configs/train_5090.json
-```
-
-训练完成后，在 `configs/eval_libero.json` 中填写实际 checkpoint 路径：
-
-```bash
-bash scripts/evaluate_5090.sh configs/eval_libero.json
+mealvla train --config configs/train_5090.json
+mealvla evaluate --config configs/eval_libero.json
 mealvla report outputs/eval/mealvla_seed42_h10
 ```
 
-首次运行会下载上游数据和模型。默认关闭 Hub 上传和 WandB；输出目录必须是新目录。环境依赖、数据占用和故障排查见[运行指南](docs/RUN_5090.md)。
+流水线和独立阶段共用同一实现。更多选项见[命令参考](docs/CLI.md)。
 
-## 配置
-
-| 文件 | 作用 | 默认设置 |
-| --- | --- | --- |
-| `configs/data.json` | 数据来源和任务选择 | `libero_object`，任务 `[0,1,2]` |
-| `configs/train_5090.json` | 微调参数 | batch 8，20,000 steps，chunk 50 |
-| `configs/eval_libero.json` | 闭环执行与评估 | horizon 10，每任务 20 回合，重试 0 |
-
-`chunk_size` 是模型预测长度，`horizon` 是每次实际执行的步数。减小 horizon 会更频繁地使用新观测，同时增加推理开销。
-
-## 评估输出
-
-每次运行生成三个文件：
+## 工程结构
 
 ```text
-outputs/eval/<run>/
-├── manifest.json     # 配置、依赖版本和运行状态
-├── episodes.jsonl    # 每个场景的执行、重试和失败记录
-└── summary.json      # 成功率、延迟分位数和置信区间
+src/mealvla/   数据、策略、执行器、实验编排、视频与报告
+configs/      数据、训练、评估和流水线配置
+scripts/      Linux 安装与运行脚本
+ros2/         动作提案校验节点
+tests/        数据契约、执行边界、报告与流程回归测试
+docs/         架构、运行、命令与评估协议
+.github/      托管 CI 工作流
 ```
 
-默认协议包含 3 个任务、60 个场景，属于自定义子集实验。首次成功率与允许重试后的成功率使用相同的场景分母；中断运行会标记为 `aborted`。推理延迟包含预处理和结果回传，仿真一步耗时单独记录。
+GitHub Actions 在 Python 3.10–3.12 上执行核心测试、mock 视频/报告流程和包构建，保留运行产物。GPU 模型训练和 LIBERO 渲染不属于 CPU CI 的覆盖范围。
 
-实验设计、指标定义与结果状态见[评估协议](docs/EXPERIMENTS.md)。
+## 适用范围
 
-## 开发
+1.0.0 提供单臂仿真实验的源码与运行工具；训练权重、实测成绩和真机部署不随源码发布。完整交付清单与验证口径见[版本与交付范围](docs/STATUS.md)。
 
-不加载模型时，可以使用 mock 策略检查执行和日志流程：
-
-```bash
-python -m pip install -e '.[dev]'
-python -m pytest
-mealvla demo --output outputs/mock-demo
-```
-
-Mock 使用固定动作和简化环境，输出标记为 `mock`，不用于模型效果评估。
-
-```text
-src/mealvla/   数据处理、策略适配、执行器和报告
-configs/       数据、训练和评估配置
-scripts/       Linux 环境与运行脚本
-ros2/          动作消息校验示例
-tests/         数据划分、执行约束和报告测试
-docs/          架构、运行指南和实验协议
-```
-
-## 范围
-
-当前实现使用同步推理和有限次数的场景重置重试。动作时效检查在推理返回后执行，不提供硬实时中断保证。配餐专用资产、双臂协作和 Flexiv 控制适配尚未实现。
+执行器采用同步推理和有限场景重置，适用于离线仿真。ROS 2 节点用于动作消息校验，不连接机械臂控制器。真机控制、双臂协作及配餐专用场景不属于该版本范围。
 
 ## 许可
 
-仓库代码采用 [MIT License](LICENSE)。模型、数据和第三方依赖遵循各自许可，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+仓库代码采用 [MIT License](LICENSE)。模型、数据及依赖遵循各自许可，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

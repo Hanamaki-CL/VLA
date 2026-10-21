@@ -1,0 +1,49 @@
+name: Core checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install core and build tools
+        run: python -m pip install -e '.[dev,video]' build twine
+      - name: Unit tests
+        run: python -m pytest -q
+      - name: CLI and video smoke check
+        run: |
+          mealvla pipeline --print-plan
+          mealvla demo --output outputs/ci-demo --record-video
+          mealvla report outputs/ci-demo
+      - name: Package checks
+        run: |
+          python -m build
+          python -m twine check dist/*
+          python -m pip uninstall -y mealvla
+          python -m pip install dist/*.whl
+          cd /tmp
+          python -m mealvla --help
+      - name: Keep reports and distributions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mealvla-core-${{ matrix.python-version }}
+          path: |
+            outputs/ci-demo/
+            dist/
+          if-no-files-found: ignore

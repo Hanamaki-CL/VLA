@@ -7,6 +7,7 @@
   "episodes_per_task": 20,
   "initial_state_start": 0,
   "seed": 42,
+  "record_video": false,
   "execution": {
     "horizon": 10,
     "max_steps": 280,

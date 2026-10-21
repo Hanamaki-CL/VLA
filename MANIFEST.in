@@ -1,0 +1,6 @@
+include LICENSE THIRD_PARTY_NOTICES.md README.md CHANGELOG.md
+recursive-include configs *.json
+recursive-include scripts *.sh
+recursive-include docs *.md
+recursive-include ros2 *.py
+recursive-include tests *.py

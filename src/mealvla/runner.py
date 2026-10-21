@@ -6,10 +6,18 @@ from .control import ActionQueue
 from .schemas import ExecutionConfig
 
 
-def run_episode(env, policy, config: ExecutionConfig, seed: int) -> dict:
+def run_episode(env, policy, config: ExecutionConfig, seed: int, observer=None) -> dict:
     attempts, events = [], []
     queue = ActionQueue(config.horizon, config.action_ttl_s)
     started = time.monotonic()
+
+    def observe(observation, retry, step):
+        if observer is not None:
+            try:
+                observer(observation, retry, step)
+            except Exception as exc:
+                raise RuntimeError(f"Observation recording failed: {exc}") from exc
+
     for retry in range(config.max_retries + 1):
         queue.clear()
         events.append({"state": "resetting", "attempt": retry})
@@ -17,6 +25,7 @@ def run_episode(env, policy, config: ExecutionConfig, seed: int) -> dict:
         policy.reset()
         observation = env.reset(seed)
         observation.validate()
+        observe(observation, retry, 0)
         latencies, control_latencies = [], []
         reason, success, steps = "max_steps", False, 0
         attempt_start = time.monotonic()
@@ -39,6 +48,7 @@ def run_episode(env, policy, config: ExecutionConfig, seed: int) -> dict:
                 steps += 1
                 observation = outcome.observation
                 observation.validate()
+                observe(observation, retry, steps)
                 if outcome.success:
                     success, reason = True, "success"
                     break

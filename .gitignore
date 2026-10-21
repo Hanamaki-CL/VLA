@@ -13,3 +13,8 @@ wandb/
 *.pt
 *.pth
 *.zip
+build/
+dist/
+.coverage
+htmlcov/
+environment-resolved.txt

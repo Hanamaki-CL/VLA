@@ -1,0 +1,7 @@
+{
+  "project_root": "..",
+  "output_dir": "outputs/experiments/mealvla_seed42",
+  "data_config": "data.json",
+  "train_config": "train_5090.json",
+  "eval_config": "eval_libero.json"
+}

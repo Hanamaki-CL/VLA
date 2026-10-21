@@ -12,14 +12,7 @@ import sys
 import numpy as np
 from . import __version__
 from .schemas import ExecutionConfig
-
-
-def read_json(path):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
-def write_json(path, value):
-    Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+from .storage import read_json, write_json
 
 
 def provenance():
@@ -44,21 +37,34 @@ def evaluate(config, mock=False):
     from .policies import MockPolicy, SmolVLAPolicy
     from .reports import summarize
     from .runner import run_episode
+    from .artifacts import export_report
+    from .recording import EpisodeRecorder
 
     execution = ExecutionConfig(**config.get("execution", {}))
     n = config["episodes_per_task"]
     tasks = config["task_ids"]
-    if not isinstance(n, int) or n < 1 or not tasks or len(tasks) != len(set(tasks)):
+    if (isinstance(n, bool) or not isinstance(n, int) or n < 1 or
+            not isinstance(tasks, list) or not tasks or
+            any(isinstance(t, bool) or not isinstance(t, int) or t < 0 for t in tasks) or
+            len(tasks) != len(set(tasks))):
         raise ValueError("Require positive episodes_per_task and unique task IDs")
     start = config.get("initial_state_start", 0)
-    if not isinstance(start, int) or start < 0:
+    if isinstance(start, bool) or not isinstance(start, int) or start < 0:
         raise ValueError("initial_state_start must be nonnegative")
+    record_video = config.get("record_video", False)
+    if not isinstance(record_video, bool):
+        raise ValueError("record_video must be true or false")
+    seed_base = config.get("seed", 42)
+    if (isinstance(seed_base, bool) or not isinstance(seed_base, int) or
+            not 0 <= seed_base + start <= seed_base + start + n - 1 < 2**32):
+        raise ValueError("Evaluation seeds must fit NumPy's unsigned 32-bit seed range")
     output = Path(config["output_dir"])
     output.mkdir(parents=True, exist_ok=False)
     os.environ.setdefault("MUJOCO_GL", "egl")
     manifest = {"config": config, "provenance": provenance(), "status": "starting",
                 "mock_only": mock, "expected_episodes": n * len(tasks)}
     write_json(output / "manifest.json", manifest)
+    (output / "episodes.jsonl").touch()
     records = []
     try:
         if mock:
@@ -69,31 +75,49 @@ def evaluate(config, mock=False):
         for task in tasks:
             for episode in range(n):
                 initial_state = start + episode
-                seed = config.get("seed", 42) + initial_state
+                seed = seed_base + initial_state
                 random.seed(seed)
                 np.random.seed(seed)
                 if not mock:
                     torch.manual_seed(seed)
                     torch.cuda.manual_seed_all(seed)
                 env = MockEnvironment() if mock else LiberoEnvironment(config["suite"], task, initial_state)
+                recorder = None
                 try:
-                    record = run_episode(env, policy, execution, seed)
+                    if record_video:
+                        recorder = EpisodeRecorder(output / "videos", f"task{task}_state{initial_state}",
+                                                   execution.control_hz)
+                    record = run_episode(env, policy, execution, seed, observer=recorder)
                 finally:
-                    env.close()
+                    try:
+                        if recorder is not None:
+                            recorder.close()
+                    finally:
+                        env.close()
                 record.update({"suite": config.get("suite", "mock"), "task_id": task,
                                "initial_state": initial_state, "checkpoint": config.get("checkpoint")})
+                if recorder is not None:
+                    record["videos"] = [path.relative_to(output).as_posix() for path in recorder.paths]
+                    record["recording_s"] = recorder.elapsed_s
                 with (output / "episodes.jsonl").open("a", encoding="utf-8") as stream:
                     stream.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
                 records.append(record)
                 write_json(output / "summary.json", summarize(records, n * len(tasks)))
                 print(f"task={task} initial_state={initial_state} success={record['success']}")
         manifest["status"] = "complete"
-    except Exception as exc:
+    except BaseException as exc:
         manifest.update(status="aborted", error=f"{type(exc).__name__}: {exc}")
         write_json(output / "summary.json", summarize(records, n * len(tasks)))
         raise
     finally:
         write_json(output / "manifest.json", manifest)
+        in_error = sys.exc_info()[0] is not None
+        try:
+            export_report(output)
+        except Exception as exc:
+            if not in_error:
+                raise
+            print(f"Report export failed: {exc}", file=sys.stderr)
     print(json.dumps(summarize(records, n * len(tasks)), indent=2))
 
 
@@ -123,6 +147,12 @@ def main():
     check.add_argument("--cuda-check", action="store_true")
     demo = commands.add_parser("demo", help="MOCK ONLY: check plumbing, no VLA benchmark")
     demo.add_argument("--output", default="outputs/mock-demo")
+    demo.add_argument("--record-video", action="store_true")
+    pipeline = commands.add_parser("pipeline", help="Prepare, train and evaluate with archived configs")
+    pipeline.add_argument("--config", default="configs/pipeline_5090.json")
+    pipeline.add_argument("--output", help="Override the experiment directory (must not exist)")
+    pipeline.add_argument("--reuse-data", action="store_true")
+    pipeline.add_argument("--print-plan", action="store_true", help="Print resolved config without running stages")
     prep = commands.add_parser("prepare", help="Export task-specific episode splits")
     prep.add_argument("--config", default="configs/data.json")
     training = commands.add_parser("train", help="Launch upstream SmolVLA fine-tuning")
@@ -140,7 +170,13 @@ def main():
             doctor(args.cuda_check)
         elif args.command == "demo":
             evaluate({"output_dir": args.output, "task_ids": [0], "episodes_per_task": 3,
-                      "execution": {"max_steps": 20}}, mock=True)
+                      "record_video": args.record_video, "execution": {"max_steps": 20}}, mock=True)
+        elif args.command == "pipeline":
+            from .pipeline import build_pipeline, run_pipeline
+            if args.print_plan:
+                print(json.dumps(build_pipeline(args.config, args.output), ensure_ascii=False, indent=2))
+            else:
+                run_pipeline(args.config, args.output, args.reuse_data)
         elif args.command == "prepare":
             from .data import prepare_dataset
             print(json.dumps(prepare_dataset(**read_json(args.config)), ensure_ascii=False, indent=2))
@@ -150,17 +186,16 @@ def main():
         elif args.command == "evaluate":
             evaluate(read_json(args.config))
         elif args.command == "report":
-            from .reports import summarize
-            root = Path(args.run_dir)
-            records = [json.loads(line) for line in (root / "episodes.jsonl").read_text(encoding="utf-8").splitlines() if line]
-            manifest = read_json(root / "manifest.json")
-            print(json.dumps(summarize(records, manifest["expected_episodes"]), ensure_ascii=False, indent=2))
+            from .artifacts import export_report
+            print(json.dumps(export_report(args.run_dir), ensure_ascii=False, indent=2))
         elif args.command == "tasks":
             from libero.libero import benchmark
             suite = benchmark.get_benchmark_dict()[args.suite]()
             print(json.dumps([{ "task_id": i, "instruction": suite.get_task(i).language}
                               for i in range(suite.n_tasks)], ensure_ascii=False, indent=2))
-    except (ValueError, OSError, ImportError, RuntimeError, KeyError, subprocess.CalledProcessError) as exc:
+    except KeyboardInterrupt:
+        parser.exit(130, "MealVLA: interrupted; recorded outputs were retained\n")
+    except (ValueError, OSError, ImportError, RuntimeError, KeyError, TypeError, subprocess.CalledProcessError) as exc:
         parser.exit(1, f"MealVLA: {type(exc).__name__}: {exc}\n")
 
 
