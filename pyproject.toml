@@ -15,6 +15,10 @@ dependencies = ["numpy>=1.24,<3"]
 robot = ["lerobot[smolvla,libero]==0.4.3", "imageio[ffmpeg]>=2.31"]
 dev = ["pytest>=8,<9"]
 
+[project.urls]
+Repository = "https://github.com/Hanamaki-CL/VLA"
+Issues = "https://github.com/Hanamaki-CL/VLA/issues"
+
 [project.scripts]
 mealvla = "mealvla.cli:main"
 

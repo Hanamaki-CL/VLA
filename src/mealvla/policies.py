@@ -1,4 +1,4 @@
-"""Actual SmolVLA adapter plus an explicitly named smoke-test policy."""
+"""SmolVLA inference and mock implementations of the action-chunk interface."""
 
 from typing import Protocol
 import numpy as np

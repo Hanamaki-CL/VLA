@@ -1,4 +1,4 @@
-"""Execution/report contract tests; no GPU or network needed when run later."""
+"""Episode execution and report aggregation tests."""
 
 import pytest
 from mealvla.envs import MockEnvironment

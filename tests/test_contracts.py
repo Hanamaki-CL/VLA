@@ -1,4 +1,4 @@
-"""Future validation suite. Delivered without execution at the user's request."""
+"""Data, observation, and action-queue contract tests."""
 
 import numpy as np
 import pytest

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run on the Linux 5090 host, not on the author's development laptop.
+# Linux environment for RTX 5090 with CUDA 12.8.
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 if [[ "$(uname -s)" != "Linux" ]]; then
