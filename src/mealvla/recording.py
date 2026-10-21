@@ -26,10 +26,11 @@ class EpisodeRecorder:
     def __call__(self, observation, attempt, step):
         import imageio.v2 as imageio
 
+        if attempt != self.attempt:
+            self.close()
         started = time.monotonic()
         try:
             if attempt != self.attempt:
-                self.close()
                 path = self.directory / f"{self.stem}_attempt{attempt}.mp4"
                 if path.exists():
                     raise FileExistsError(path)
@@ -43,4 +44,8 @@ class EpisodeRecorder:
     def close(self):
         if self.writer is not None:
             writer, self.writer = self.writer, None
-            writer.close()
+            started = time.monotonic()
+            try:
+                writer.close()
+            finally:
+                self.elapsed_s += time.monotonic() - started

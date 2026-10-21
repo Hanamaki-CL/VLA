@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import json
 
 from mealvla.envs import MockEnvironment
 from mealvla.policies import MockPolicy
@@ -33,3 +34,33 @@ def test_recording_failure_is_not_counted_as_policy_contract_failure():
     with pytest.raises(RuntimeError, match="recording"):
         run_episode(MockEnvironment(), MockPolicy(), ExecutionConfig(), 42,
                     observer=broken_observer)
+
+
+def test_encoder_close_failure_still_closes_environment(tmp_path, monkeypatch):
+    from mealvla.cli import evaluate
+
+    closed = []
+
+    class TrackedEnvironment(MockEnvironment):
+        def close(self):
+            closed.append(True)
+
+    class BrokenEncoder:
+        def __init__(self, *args):
+            pass
+
+        def __call__(self, *args):
+            pass
+
+        def close(self):
+            raise RuntimeError("encoder flush failed")
+
+    monkeypatch.setattr("mealvla.envs.MockEnvironment", TrackedEnvironment)
+    monkeypatch.setattr("mealvla.recording.EpisodeRecorder", BrokenEncoder)
+    root = tmp_path / "run"
+    with pytest.raises(RuntimeError, match="encoder flush"):
+        evaluate({"output_dir": str(root), "task_ids": [0], "episodes_per_task": 1,
+                  "record_video": True}, mock=True)
+    assert closed == [True]
+    assert json.loads((root / "manifest.json").read_text())["status"] == "aborted"
+    assert (root / "report.html").exists()

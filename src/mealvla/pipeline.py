@@ -26,8 +26,8 @@ def build_pipeline(config_path, output_dir=None):
             data["task_ids"] != evaluation["task_ids"]):
         raise ValueError("Pipeline data and evaluation must use the same suite and task IDs")
     dataset = (project / data["output"]).resolve()
-    if root == dataset or dataset in root.parents:
-        raise ValueError("Pipeline output cannot be inside the dataset directory")
+    if root == dataset or dataset in root.parents or root in dataset.parents:
+        raise ValueError("Pipeline output and dataset directories cannot overlap")
     data["output"] = str(dataset)
     training.update(dataset_root=str(dataset / "train"), output_dir=str(root / "train"))
     # Hub model identifiers stay unchanged; explicit local paths are resolved.
@@ -71,7 +71,7 @@ def run_stage(command, cwd, log_path):
             if process.poll() is None:
                 try:
                     if os.name == "posix":
-                        os.killpg(process.pid, signal.SIGTERM)
+                        os.killpg(process.pid, signal.SIGINT)
                     else:
                         process.terminate()
                 except ProcessLookupError:

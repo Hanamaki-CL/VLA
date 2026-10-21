@@ -9,6 +9,7 @@ from pathlib import Path
 import random
 import subprocess
 import sys
+import time
 import numpy as np
 from . import __version__
 from .schemas import ExecutionConfig
@@ -83,6 +84,7 @@ def evaluate(config, mock=False):
                     torch.cuda.manual_seed_all(seed)
                 env = MockEnvironment() if mock else LiberoEnvironment(config["suite"], task, initial_state)
                 recorder = None
+                final_close_s = 0.0
                 try:
                     if record_video:
                         recorder = EpisodeRecorder(output / "videos", f"task{task}_state{initial_state}",
@@ -91,12 +93,16 @@ def evaluate(config, mock=False):
                 finally:
                     try:
                         if recorder is not None:
+                            close_started = time.monotonic()
                             recorder.close()
+                            final_close_s = time.monotonic() - close_started
                     finally:
                         env.close()
                 record.update({"suite": config.get("suite", "mock"), "task_id": task,
                                "initial_state": initial_state, "checkpoint": config.get("checkpoint")})
                 if recorder is not None:
+                    record["elapsed_s"] += final_close_s
+                    record["attempts"][-1]["elapsed_s"] += final_close_s
                     record["videos"] = [path.relative_to(output).as_posix() for path in recorder.paths]
                     record["recording_s"] = recorder.elapsed_s
                 with (output / "episodes.jsonl").open("a", encoding="utf-8") as stream:
