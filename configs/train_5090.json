@@ -1,0 +1,12 @@
+{
+  "base_model": "lerobot/smolvla_base",
+  "dataset_root": "data/libero_mealvla/train",
+  "output_dir": "outputs/train/mealvla_smolvla_seed42",
+  "batch_size": 8,
+  "steps": 20000,
+  "chunk_size": 50,
+  "n_action_steps": 10,
+  "num_workers": 4,
+  "save_freq": 5000,
+  "seed": 42
+}

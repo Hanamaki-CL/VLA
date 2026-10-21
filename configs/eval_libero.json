@@ -1,0 +1,19 @@
+{
+  "checkpoint": "outputs/train/mealvla_smolvla_seed42/checkpoints/last/pretrained_model",
+  "output_dir": "outputs/eval/mealvla_seed42_h10",
+  "device": "cuda",
+  "suite": "libero_object",
+  "task_ids": [0, 1, 2],
+  "episodes_per_task": 20,
+  "initial_state_start": 0,
+  "seed": 42,
+  "execution": {
+    "horizon": 10,
+    "max_steps": 280,
+    "max_retries": 0,
+    "action_ttl_s": 5.0,
+    "inference_timeout_s": 5.0,
+    "control_hz": 20.0,
+    "realtime": false
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "repo_id": "HuggingFaceVLA/libero",
+  "output": "data/libero_mealvla",
+  "suite_name": "libero_object",
+  "task_ids": [0, 1, 2],
+  "seed": 42,
+  "revision": null
+}
